@@ -1,69 +1,116 @@
-import argparse
-
-from nltk.tokenize import sent_tokenize, word_tokenize
+#importing libraries
 from nltk.corpus import stopwords
-from string import punctuation
-from nltk.probability import FreqDist
-from heapq import nlargest
-from collections import defaultdict
+from nltk.stem import PorterStemmer
+from nltk.tokenize import word_tokenize, sent_tokenize
+import bs4 as BeautifulSoup
+import urllib.request  
 
-def main():
-	args = parse_arguments()
-	content = read_file(args.filepath)
-	content = sanitize_input(content)
+#fetching the content from the URL
+fetched_data = urllib.request.urlopen('https://en.wikipedia.org/wiki/20th_century')
 
-	sent_tokens, word_tokens = tokenize_content(content)
-	sent_ranks = score_tokens(sent_tokens, word_tokens)
-	print(summarize(sent_ranks, sent_tokens, args.length))
+article_read = fetched_data.read()
 
-def parse_arguments():
-	parser = argparse.ArgumentParser()
-	parser.add_argument('filepath', help='File name of text to summarize')
-	parser.add_argument('-l', '--length', default=4, help='No. of sentences to return')
-	args = parser.parse_args()
-	return args
+#parsing the URL content and storing in a variable
+article_parsed = BeautifulSoup.BeautifulSoup(article_read,'html.parser')
 
-def read_file(path):
-	try:
-		with open(path, 'r') as f:
-			return f.read()
-	except IOError as e:
-		print('File could not be located')
+#returning <p> tags
+paragraphs = article_parsed.find_all('p')
 
-def sanitize_input(data):
-	replace = {
-		ord('\f') : ' ',
-		ord('\t') : ' ',
-		ord('\n') : ' ',
-		ord('\r') : None
-	}
-	return data.translate(replace)
+article_content = ''
 
-def tokenize_content(content):
+#looping through the paragraphs and adding them to the variable
+for p in paragraphs:  
+    article_content += p.text
 
-	stop_words = set(stopwords.words('english') + list(punctuation))
-	words = word_tokenize(content.lower())
-	return (sent_tokenize(content), [word for word in words if word not in stop_words])
 
-def score_tokens(sent_tokens, word_tokens):
-	word_freq = FreqDist(word_tokens)
-	rank = defaultdict(int)
-	for i, sent in enumerate(sent_tokens):
-		for  word in word_tokenize(sent.lower()):
-			if word in word_freq:
-				rank[i] += word_freq[word]
+def _create_dictionary_table(text_string) -> dict:
+   
+    #removing stop words
+    stop_words = set(stopwords.words("english"))
+    
+    words = word_tokenize(text_string)
+    
+    #reducing words to their root form
+    stem = PorterStemmer()
+    
+    #creating dictionary for the word frequency table
+    frequency_table = dict()
+    for wd in words:
+        wd = stem.stem(wd)
+        if wd in stop_words:
+            continue
+        if wd in frequency_table:
+            frequency_table[wd] += 1
+        else:
+            frequency_table[wd] = 1
 
-	return rank
+    return frequency_table
 
-def summarize(ranks, sentences, length):
-	if int(length) > len(sentences):
-		print('You requested more sentences in the summary than there are in the text.')
-		return ''
 
-	else:
-		indices = nlargest(int(length), ranks, key=ranks.get)
-		final_summary = [sentences[j] for j in indices]
-		return ' '.join(final_summary)
+def _calculate_sentence_scores(sentences, frequency_table) -> dict:   
+
+    #algorithm for scoring a sentence by its words
+    sentence_weight = dict()
+
+    for sentence in sentences:
+        sentence_wordcount = (len(word_tokenize(sentence)))
+        sentence_wordcount_without_stop_words = 0
+        for word_weight in frequency_table:
+            if word_weight in sentence.lower():
+                sentence_wordcount_without_stop_words += 1
+                if sentence[:7] in sentence_weight:
+                    sentence_weight[sentence[:7]] += frequency_table[word_weight]
+                else:
+                    sentence_weight[sentence[:7]] = frequency_table[word_weight]
+
+        sentence_weight[sentence[:7]] = sentence_weight[sentence[:7]] / sentence_wordcount_without_stop_words
+
+       
+
+    return sentence_weight
+
+def _calculate_average_score(sentence_weight) -> int:
+   
+    #calculating the average score for the sentences
+    sum_values = 0
+    for entry in sentence_weight:
+        sum_values += sentence_weight[entry]
+
+    #getting sentence average value from source text
+    average_score = (sum_values / len(sentence_weight))
+
+    return average_score
+
+def _get_article_summary(sentences, sentence_weight, threshold):
+    sentence_counter = 0
+    article_summary = ''
+
+    for sentence in sentences:
+        if sentence[:7] in sentence_weight and sentence_weight[sentence[:7]] >= (threshold):
+            article_summary += " " + sentence
+            sentence_counter += 1
+
+    return article_summary
+
+def _run_article_summary(article):
+    
+    #creating a dictionary for the word frequency table
+    frequency_table = _create_dictionary_table(article)
+
+    #tokenizing the sentences
+    sentences = sent_tokenize(article)
+
+    #algorithm for scoring a sentence by its words
+    sentence_scores = _calculate_sentence_scores(sentences, frequency_table)
+
+    #getting the threshold
+    threshold = _calculate_average_score(sentence_scores)
+
+    #producing the summary
+    article_summary = _get_article_summary(sentences, sentence_scores, 1.5 * threshold)
+
+    return article_summary
 
 if __name__ == '__main__':
-ma
+    summary_results = _run_article_summary(article_content)
+    print(summary_results)
